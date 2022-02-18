@@ -1,4 +1,4 @@
-module github.com/sbrownjc/jiradeps
+module github.com/sbrownjc/jcjiradeps
 
 go 1.17
 
