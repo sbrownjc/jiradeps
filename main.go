@@ -80,7 +80,7 @@ func AddJiraNode(fc *flowchart.Flowchart, key, text string) (node *flowchart.Nod
 	node = fc.GetNode(key)
 	if node == nil {
 		node = fc.AddNode(key)
-		node.AddLines(key, text)
+		node.AddLines(key, strings.ReplaceAll(text, `"`, "'"))
 		node.Link = "https://jumpcloud.atlassian.net/browse/" + key
 		node.LinkText = "Jira: " + key
 	}
