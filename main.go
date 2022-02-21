@@ -144,7 +144,7 @@ func genDepFlowchart(c *jira.Client, issueNum string, fc *flowchart.Flowchart) e
 	fmt.Printf("\n%s: %+v\n", issue.Key, issue.Fields.Summary)
 	fmt.Printf("Type: %s\n", issue.Fields.Type.Name)
 	fmt.Printf("Priority: %s\n", issue.Fields.Priority.Name)
-	fmt.Printf("Links:\n")
+	fmt.Printf("Links: ")
 
 	getAllLinks(issue, c, linkSet, fc)
 
@@ -201,8 +201,12 @@ func main() {
 			returnCode++
 		}
 
-		fmt.Printf("\n```mermaid\n%s```\n\n", flow.String())
-		fmt.Println(flow.LiveURL())
+		if len(flow.ListNodes()) > 1 {
+			fmt.Printf("\n\n```mermaid\n%s```\n\n", flow.String())
+			fmt.Println(flow.LiveURL())
+		} else {
+			fmt.Println("None")
+		}
 	}
 
 	os.Exit(returnCode)
