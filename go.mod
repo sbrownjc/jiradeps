@@ -2,9 +2,13 @@ module github.com/sbrownjc/jcjiradeps
 
 go 1.17
 
-require github.com/andygrunwald/go-jira v1.14.0
+require (
+	github.com/StephenBrown2/mermaidgen v0.0.0-20220221191524-ee01e86f9cc9
+	github.com/andygrunwald/go-jira v1.14.0
+)
 
 require (
+	github.com/Heiko-san/mermaidgen v0.0.0-20190623222458-ec72afae378b // indirect
 	github.com/fatih/structs v1.1.0 // indirect
 	github.com/golang-jwt/jwt v3.2.1+incompatible // indirect
 	github.com/google/go-querystring v0.0.0-20170111101155-53e6ce116135 // indirect

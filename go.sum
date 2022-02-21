@@ -1,3 +1,7 @@
+github.com/Heiko-san/mermaidgen v0.0.0-20190623222458-ec72afae378b h1:vMD9lRM0RSgyh32p9nu7guZq99XBo+m2LTTgih1Jkyc=
+github.com/Heiko-san/mermaidgen v0.0.0-20190623222458-ec72afae378b/go.mod h1:wsRHegZ2aKrPucCK/XTSCe3stHT09+U8aAM5AZ0XdKY=
+github.com/StephenBrown2/mermaidgen v0.0.0-20220221191524-ee01e86f9cc9 h1:aIABlC3n+wABCQVjal5TWHNt/HE95PKNQeeCuO461uA=
+github.com/StephenBrown2/mermaidgen v0.0.0-20220221191524-ee01e86f9cc9/go.mod h1:HFtaafEy4sqgbUhCMiByDlOREEaSwNgsvlxfdtgMtMQ=
 github.com/andygrunwald/go-jira v1.14.0 h1:7GT/3qhar2dGJ0kq8w0d63liNyHOnxZsUZ9Pe4+AKBI=
 github.com/andygrunwald/go-jira v1.14.0/go.mod h1:KMo2f4DgMZA1C9FdImuLc04x4WQhn5derQpnsuBFgqE=
 github.com/fatih/structs v1.1.0 h1:Q7juDM0QtcnhCpeyLGQKyg4TOIghuNXrkL32pHAUMxo=

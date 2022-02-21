@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/StephenBrown2/mermaidgen/flowchart"
 	"github.com/andygrunwald/go-jira"
 )
 
@@ -22,6 +23,7 @@ var ErrIncompleteCredentials = errors.New("must provide 'username' and 'token' k
 
 func getAuthCreds() (creds AuthCreds, err error) {
 	fileName := os.ExpandEnv("${HOME}/.config/gojira")
+
 	file, err := ioutil.ReadFile(fileName)
 	if err != nil {
 		return creds, fmt.Errorf("reading file: %w", err)
@@ -46,63 +48,94 @@ func (s StringSet) Add(n string) {
 	}
 }
 
+func (s StringSet) Exists(n string) bool {
+	_, ok := s[n]
+	return ok
+}
+
 func (s StringSet) List() (result []string) {
 	for k := range s {
 		result = append(result, k)
 	}
+
 	sort.Strings(result)
+
 	return result
 }
 
-var issueKeys = StringSet{}
-
 type Link struct {
-	From string
-	Type string
-	Text string
-	To   string
+	From      string
+	FromTitle string
+	Type      string
+	Text      string
+	To        string
+	ToTitle   string
 }
 
 func (l Link) String() string {
 	return fmt.Sprintf("%s -- %s --> %s", l.From, l.Type, l.To)
 }
 
-func (l Link) StringText() string {
-	if l.Type == "Relates" {
-		return fmt.Sprintf("%s -- %s --- %s", l.From, l.Text, l.To)
+func AddJiraNode(fc *flowchart.Flowchart, key, text string) (node *flowchart.Node) {
+	node = fc.GetNode(key)
+	if node == nil {
+		node = fc.AddNode(key)
+		node.AddLines(key, text)
+		node.Link = "https://jumpcloud.atlassian.net/browse/" + key
+		node.LinkText = "Jira: " + key
 	}
-	return fmt.Sprintf("%s -- %s --> %s", l.From, l.Text, l.To)
+
+	return node
 }
 
-func getAllLinks(issue *jira.Issue, client *jira.Client, links map[string]struct{}) {
-	issueKeys.Add(issue.Key)
+func AddLink(fc *flowchart.Flowchart, link Link) {
+	n1 := AddJiraNode(fc, link.From, link.FromTitle)
+	n2 := AddJiraNode(fc, link.To, link.ToTitle)
+	e := fc.AddEdge(n1, n2)
+	e.Text = []string{link.Text}
+
+	if strings.EqualFold(link.Type, "relates") {
+		e.Shape = flowchart.EShapeLine
+	}
+}
+
+func getAllLinks(issue *jira.Issue, client *jira.Client, links StringSet, fc *flowchart.Flowchart) {
 	if len(issue.Fields.IssueLinks) == 0 {
 		issue, _, _ = client.Issue.Get(issue.Key, nil)
 	}
+
 	for _, link := range issue.Fields.IssueLinks {
 		if link.OutwardIssue != nil {
-			issueKeys.Add(link.OutwardIssue.Key)
-			lo := Link{From: issue.Key, Type: link.Type.Name, Text: link.Type.Outward, To: link.OutwardIssue.Key}
-			if _, ok := links[lo.String()]; !ok {
-				fmt.Printf("  %s\n", lo.StringText())
-				links[lo.String()] = struct{}{}
-				getAllLinks(link.OutwardIssue, client, links)
+			lo := Link{
+				From: issue.Key, FromTitle: issue.Fields.Summary,
+				Type: link.Type.Name, Text: link.Type.Outward,
+				To: link.OutwardIssue.Key, ToTitle: link.OutwardIssue.Fields.Summary,
+			}
+			if !links.Exists(lo.String()) {
+				AddLink(fc, lo)
+				links.Add(lo.String())
+				getAllLinks(link.OutwardIssue, client, links, fc)
 			}
 		}
+
 		if link.InwardIssue != nil {
-			issueKeys.Add(link.InwardIssue.Key)
-			li := Link{From: link.InwardIssue.Key, Type: link.Type.Name, Text: link.Type.Outward, To: issue.Key}
-			if _, ok := links[li.String()]; !ok {
-				fmt.Printf("  %s\n", li.StringText())
-				links[li.String()] = struct{}{}
-				getAllLinks(link.InwardIssue, client, links)
+			li := Link{
+				From: link.InwardIssue.Key, FromTitle: link.InwardIssue.Fields.Summary,
+				Type: link.Type.Name, Text: link.Type.Outward,
+				To: issue.Key, ToTitle: issue.Fields.Summary,
+			}
+			if !links.Exists(li.String()) {
+				AddLink(fc, li)
+				links.Add(li.String())
+				getAllLinks(link.InwardIssue, client, links, fc)
 			}
 		}
 	}
 }
 
-func printIssueLinks(c *jira.Client, issueNum string) error {
-	links := map[string]struct{}{}
+func genDepFlowchart(c *jira.Client, issueNum string, fc *flowchart.Flowchart) error {
+	linkSet := StringSet{}
+
 	issue, _, err := c.Issue.Get(strings.TrimSpace(issueNum), nil)
 	if err != nil {
 		return fmt.Errorf("error getting issue: %w", err)
@@ -112,18 +145,15 @@ func printIssueLinks(c *jira.Client, issueNum string) error {
 	fmt.Printf("Type: %s\n", issue.Fields.Type.Name)
 	fmt.Printf("Priority: %s\n", issue.Fields.Priority.Name)
 	fmt.Printf("Links:\n")
-	fmt.Println("```mermaid\ngraph TD")
-	getAllLinks(issue, c, links)
-	fmt.Println()
-	for _, k := range issueKeys.List() {
-		fmt.Printf("  click %s \"https://jumpcloud.atlassian.net/browse/%s\"\n", k, k)
-	}
-	fmt.Println("```")
+
+	getAllLinks(issue, c, linkSet, fc)
+
 	return nil
 }
 
 func promptForIssue() string {
 	fmt.Print("Issue Number: ")
+
 	r := bufio.NewReader(os.Stdin)
 
 	issueNum, err := r.ReadString('\n')
@@ -131,6 +161,7 @@ func promptForIssue() string {
 		fmt.Printf("Error getting issue number: %v\n", err)
 		os.Exit(1)
 	}
+
 	return issueNum
 }
 
@@ -158,13 +189,22 @@ func main() {
 	} else {
 		issues = append(issues, promptForIssue())
 	}
+
 	var returnCode int
+
 	for _, issueNum := range issues {
-		err := printIssueLinks(jiraClient, issueNum)
+		flow := flowchart.NewFlowchart()
+
+		err := genDepFlowchart(jiraClient, issueNum, flow)
 		if err != nil {
 			fmt.Println(err)
 			returnCode++
 		}
+
+		fmt.Println()
+		fmt.Printf("```mermaid\n%s```\n\n", flow.String())
+		fmt.Println(flow.LiveURL())
 	}
+
 	os.Exit(returnCode)
 }
