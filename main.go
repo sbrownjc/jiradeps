@@ -63,38 +63,37 @@ func (s StringSet) List() (result []string) {
 	return result
 }
 
-type Link struct {
-	From      string
-	FromTitle string
-	Type      string
-	Text      string
-	To        string
-	ToTitle   string
+type JiraLink struct {
+	From *jira.Issue
+	Link *jira.IssueLink
+	To   *jira.Issue
 }
 
-func (l Link) String() string {
-	return fmt.Sprintf("%s -- %s --> %s", l.From, l.Type, l.To)
+func (l JiraLink) String() string {
+	return fmt.Sprintf("%s -- %s --> %s", l.From.Key, l.Link.Type.Name, l.To.Key)
 }
 
-func AddJiraNode(fc *flowchart.Flowchart, key, text string) (node *flowchart.Node) {
-	node = fc.GetNode(key)
+func AddJiraNode(fc *flowchart.Flowchart, issue *jira.Issue) (node *flowchart.Node) {
+	node = fc.GetNode(issue.Key)
 	if node == nil {
-		node = fc.AddNode(key)
-		node.AddLines(key, strings.ReplaceAll(text, `"`, "'"))
-		node.Link = "https://jumpcloud.atlassian.net/browse/" + key
-		node.LinkText = "Jira: " + key
+		node = fc.AddNode(issue.Key)
+		text := issue.Fields.Summary
+		status := issue.Fields.Status.Name
+		node.AddLines(fmt.Sprintf("%s - %s", issue.Key, status), strings.ReplaceAll(text, `"`, "'"))
+		node.Link = "https://jumpcloud.atlassian.net/browse/" + issue.Key
+		node.LinkText = "Jira: " + issue.Key
 	}
 
 	return node
 }
 
-func AddLink(fc *flowchart.Flowchart, link Link) {
-	n1 := AddJiraNode(fc, link.From, link.FromTitle)
-	n2 := AddJiraNode(fc, link.To, link.ToTitle)
+func AddLink(fc *flowchart.Flowchart, link JiraLink) {
+	n1 := AddJiraNode(fc, link.From)
+	n2 := AddJiraNode(fc, link.To)
 	e := fc.AddEdge(n1, n2)
-	e.Text = []string{link.Text}
+	e.Text = []string{link.Link.Type.Outward}
 
-	if strings.EqualFold(link.Type, "relates") {
+	if strings.EqualFold(link.Link.Type.Name, "relates") {
 		e.Shape = flowchart.EShapeLine
 	}
 }
@@ -106,10 +105,10 @@ func getAllLinks(issue *jira.Issue, client *jira.Client, links StringSet, fc *fl
 
 	for _, link := range issue.Fields.IssueLinks {
 		if link.OutwardIssue != nil {
-			lo := Link{
-				From: issue.Key, FromTitle: issue.Fields.Summary,
-				Type: link.Type.Name, Text: link.Type.Outward,
-				To: link.OutwardIssue.Key, ToTitle: link.OutwardIssue.Fields.Summary,
+			lo := JiraLink{
+				From: issue,
+				Link: link,
+				To:   link.OutwardIssue,
 			}
 			if !links.Exists(lo.String()) {
 				AddLink(fc, lo)
@@ -119,10 +118,10 @@ func getAllLinks(issue *jira.Issue, client *jira.Client, links StringSet, fc *fl
 		}
 
 		if link.InwardIssue != nil {
-			li := Link{
-				From: link.InwardIssue.Key, FromTitle: link.InwardIssue.Fields.Summary,
-				Type: link.Type.Name, Text: link.Type.Outward,
-				To: issue.Key, ToTitle: issue.Fields.Summary,
+			li := JiraLink{
+				From: link.InwardIssue,
+				Link: link,
+				To:   issue,
 			}
 			if !links.Exists(li.String()) {
 				AddLink(fc, li)
