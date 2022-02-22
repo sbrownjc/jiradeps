@@ -110,6 +110,31 @@ func GetStatusStyle(fc *flowchart.Flowchart, status string) (style *flowchart.No
 	return style
 }
 
+func GetStatusIcon(status string) (icon string) {
+	switch status {
+	case "To Do":
+		icon = "fa:fa-list"
+	case "In Progress":
+		icon = "fa:fa-play"
+	case "In Code Review":
+		icon = "fa:fa-eye"
+	case "Ready for Local Testing":
+		icon = "fa:fa-spinner fa:fa-laptop fa:fa-flask"
+	case "In Local Test":
+		icon = "fa:fa-laptop fa:fa-flask"
+	case "Ready for Staging Test":
+		icon = "fa:fa-spinner fa:fa-server fa:fa-flask"
+	case "In Staging Test":
+		icon = "fa:fa-server fa:fa-flask"
+	case "Ready for Production":
+		icon = "fa:fa-spinner fa:fa-server"
+	case "Done":
+		icon = "fa:fa-check"
+	}
+
+	return icon
+}
+
 func AddJiraNode(fc *flowchart.Flowchart, issue *jira.Issue) (node *flowchart.Node) {
 	node = fc.GetNode(issue.Key)
 	if node == nil {
@@ -119,7 +144,10 @@ func AddJiraNode(fc *flowchart.Flowchart, issue *jira.Issue) (node *flowchart.No
 		node.Style = GetStatusStyle(fc, status)
 		node.Link = "https://jumpcloud.atlassian.net/browse/" + issue.Key
 		node.LinkText = "Jira: " + issue.Key
-		node.AddLines(fmt.Sprintf("%s - %s", issue.Key, status), strings.ReplaceAll(html.EscapeString(text), "&#", "#"))
+		node.AddLines(
+			fmt.Sprintf("%s %s - %s", GetStatusIcon(status), issue.Key, status),
+			strings.ReplaceAll(html.EscapeString(text), "&#", "#"),
+		)
 	}
 
 	return node
