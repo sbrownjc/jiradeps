@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"io/ioutil"
 	"os"
 	"sort"
@@ -73,15 +74,52 @@ func (l JiraLink) String() string {
 	return fmt.Sprintf("%s -- %s --> %s", l.From.Key, l.Link.Type.Name, l.To.Key)
 }
 
+func GetStatusStyle(fc *flowchart.Flowchart, status string) (style *flowchart.NodeStyle) {
+	style = fc.NodeStyle(strings.ReplaceAll(status, " ", ""))
+
+	if style.Fill != "" {
+		return style
+	}
+
+	switch status {
+	case "To Do":
+		style.Fill = `#D3D3D3`
+		style.Stroke = `#808080`
+	case "In Progress":
+		style.Fill = `#0052CC`
+		style.More = `color:#fff`
+	case "In Code Review":
+		style.Fill = `#998DD9`
+	case "Ready for Local Testing":
+		style.Fill = `#00C7E6`
+	case "In Local Test":
+		style.Fill = `#008DA6`
+	case "Ready for Staging Test":
+		style.Fill = `#FFE380`
+	case "In Staging Test":
+		style.Fill = `#FFAB00`
+	case "Ready for Production":
+		style.Fill = `#108010`
+		style.More = `color:#fff`
+	case "Done":
+		style.Fill = `#008000`
+		style.Stroke = flowchart.ColorGreen
+		style.More = `color:#0f0`
+	}
+
+	return style
+}
+
 func AddJiraNode(fc *flowchart.Flowchart, issue *jira.Issue) (node *flowchart.Node) {
 	node = fc.GetNode(issue.Key)
 	if node == nil {
 		node = fc.AddNode(issue.Key)
 		text := issue.Fields.Summary
 		status := issue.Fields.Status.Name
-		node.AddLines(fmt.Sprintf("%s - %s", issue.Key, status), strings.ReplaceAll(text, `"`, "'"))
+		node.Style = GetStatusStyle(fc, status)
 		node.Link = "https://jumpcloud.atlassian.net/browse/" + issue.Key
 		node.LinkText = "Jira: " + issue.Key
+		node.AddLines(fmt.Sprintf("%s - %s", issue.Key, status), strings.ReplaceAll(html.EscapeString(text), "&#", "#"))
 	}
 
 	return node
