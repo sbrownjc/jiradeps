@@ -1,18 +1,20 @@
 package main
 
 import (
-	"bufio"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"html"
-	"io/ioutil"
+	"io/fs"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
+	"unicode"
 
-	"github.com/StephenBrown2/mermaidgen/flowchart"
+	"github.com/Heiko-san/mermaidgen/flowchart"
 	"github.com/andygrunwald/go-jira"
+	"github.com/charmbracelet/huh"
 )
 
 type AuthCreds struct {
@@ -24,18 +26,69 @@ var ErrIncompleteCredentials = errors.New("must provide 'username' and 'token' k
 
 func getAuthCreds() (creds AuthCreds, err error) {
 	fileName := os.ExpandEnv("${HOME}/.config/gojira")
+	var newCreds bool
+	file, err := os.ReadFile(fileName)
 
-	file, err := ioutil.ReadFile(fileName)
+	usernameInput := huh.NewInput().
+		Title("Username").
+		Value(&creds.Username).Validate(func(s string) error {
+		if s == "" {
+			return fmt.Errorf("Username cannot be empty")
+		}
+		return nil
+	})
+
+	tokenInput := huh.NewInput().
+		Title("API Token").
+		Value(&creds.Token).Validate(func(s string) error {
+		if s == "" {
+			return fmt.Errorf("API token cannot be empty")
+		}
+		if len(s) < 190 {
+			return fmt.Errorf("API token must be at least 190 characters")
+		}
+		if len(s) > 200 {
+			return fmt.Errorf("API token must be at most 200 characters")
+		}
+		if strings.Contains(s, "\"") {
+			return fmt.Errorf("API token must not contain quotes")
+		}
+		return nil
+	})
+
 	if err != nil {
-		return creds, fmt.Errorf("reading file: %w", err)
+		if errors.Is(err, fs.ErrNotExist) {
+			// If the file does not exist, prompt for credentials
+			huh.NewForm(huh.NewGroup(usernameInput, tokenInput).Title("Jira Credentials")).Run()
+			newCreds = true
+		} else {
+			return creds, fmt.Errorf("reading file: %w", err)
+		}
 	}
 
-	if err = json.Unmarshal(file, &creds); err != nil {
-		return creds, fmt.Errorf("unmarshalling file: %w", err)
+	if !newCreds {
+		if err = json.Unmarshal(file, &creds); err != nil {
+			return creds, fmt.Errorf("unmarshalling file: %w", err)
+		}
 	}
 
-	if creds.Username == "" || creds.Token == "" {
-		return creds, fmt.Errorf("%w: %q", ErrIncompleteCredentials, fileName)
+	if creds.Username == "" {
+		usernameInput.Run()
+		newCreds = true
+	}
+	if creds.Token == "" {
+		tokenInput.Run()
+		newCreds = true
+	}
+
+	if newCreds {
+		jsonData, err := json.MarshalIndent(creds, "", "  ")
+		if err != nil {
+			return creds, fmt.Errorf("marshalling credentials: %w", err)
+		}
+		if err = os.WriteFile(fileName, jsonData, 0o600); err != nil {
+			return creds, fmt.Errorf("writing file: %w", err)
+		}
 	}
 
 	return creds, nil
@@ -71,7 +124,7 @@ type JiraLink struct {
 }
 
 func (l JiraLink) String() string {
-	return fmt.Sprintf("%s -- %s --> %s", l.From.Key, l.Link.Type.Name, l.To.Key)
+	return fmt.Sprintf("%s == %s ==> %s", l.From.Key, l.Link.Type.Name, l.To.Key)
 }
 
 func GetStatusStyle(fc *flowchart.Flowchart, status string) (style *flowchart.NodeStyle) {
@@ -87,7 +140,7 @@ func GetStatusStyle(fc *flowchart.Flowchart, status string) (style *flowchart.No
 		style.Stroke = `#808080`
 	case "In Progress":
 		style.Fill = `#0052CC`
-		style.More = `color:#fff`
+		style.Stroke = flowchart.ColorWhite
 	case "In Code Review":
 		style.Fill = `#998DD9`
 	case "Ready for Local Testing":
@@ -100,11 +153,10 @@ func GetStatusStyle(fc *flowchart.Flowchart, status string) (style *flowchart.No
 		style.Fill = `#FFAB00`
 	case "Ready for Production":
 		style.Fill = `#108010`
-		style.More = `color:#fff`
+		style.Stroke = flowchart.ColorWhite
 	case "Done":
 		style.Fill = `#008000`
 		style.Stroke = flowchart.ColorGreen
-		style.More = `color:#0f0`
 	}
 
 	return style
@@ -141,6 +193,7 @@ func AddJiraNode(fc *flowchart.Flowchart, issue *jira.Issue) (node *flowchart.No
 		node = fc.AddNode(issue.Key)
 		text := issue.Fields.Summary
 		status := issue.Fields.Status.Name
+		node.Shape = flowchart.NShapeRoundRect
 		node.Style = GetStatusStyle(fc, status)
 		node.Link = "https://jumpcloud.atlassian.net/browse/" + issue.Key
 		node.LinkText = "Jira: " + issue.Key
@@ -159,8 +212,10 @@ func AddLink(fc *flowchart.Flowchart, link JiraLink) {
 	e := fc.AddEdge(n1, n2)
 	e.Text = []string{link.Link.Type.Outward}
 
+	e.Shape = flowchart.EShapeThickArrow
+
 	if strings.EqualFold(link.Link.Type.Name, "relates") {
-		e.Shape = flowchart.EShapeLine
+		e.Shape = flowchart.EShapeThickLine
 	}
 }
 
@@ -211,23 +266,62 @@ func genDepFlowchart(c *jira.Client, issueNum string, fc *flowchart.Flowchart) e
 	fmt.Printf("Priority: %s\n", issue.Fields.Priority.Name)
 	fmt.Printf("Links: ")
 
-	getAllLinks(issue, c, linkSet, fc)
+	if issue.Fields.Type.Name == "Epic" {
+		issues, _, err := c.Issue.Search(fmt.Sprintf("parentEpic = %s", issue.Key), nil)
+		if err != nil {
+			return fmt.Errorf("error searching for child issues: %w", err)
+		}
+		for _, childIssue := range issues {
+			getAllLinks(&childIssue, c, linkSet, fc)
+		}
+	} else {
+		getAllLinks(issue, c, linkSet, fc)
+	}
 
 	return nil
 }
 
-func promptForIssue() string {
-	fmt.Print("Issue Number: ")
+func promptForIssue() (issueNum string) {
+	huh.NewInput().
+		Title("Issue Number").
+		Value(&issueNum).Validate(func(s string) error {
+		if s == "" {
+			return fmt.Errorf("Issue Number cannot be empty")
+		}
 
-	r := bufio.NewReader(os.Stdin)
+		// Issue Number must be in the format 'ABC-123'
+		s = strings.TrimSpace(s)
+		s = strings.ToUpper(s)
 
-	issueNum, err := r.ReadString('\n')
-	if err != nil {
-		fmt.Printf("Error getting issue number: %v\n", err)
-		os.Exit(1)
-	}
+		// Check if it starts with letters followed by a hyphen and then digits
+		if !strings.Contains(s, "-") {
+			return fmt.Errorf("Issue Number must contain a hyphen")
+		}
+
+		parts := strings.Split(s, "-")
+		if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+			return fmt.Errorf("Issue Number must contain two parts separated by a hyphen")
+		}
+
+		if !strings.ContainsFunc(parts[0], func(r rune) bool {
+			return unicode.IsLetter(r)
+		}) {
+			return fmt.Errorf("Issue Number must start with letters")
+		}
+
+		_, err := strconv.Atoi(string(parts[1]))
+		if err != nil {
+			return fmt.Errorf("Issue Number must end with digits")
+		}
+
+		return nil
+	}).Run()
 
 	return issueNum
+}
+
+func imgURL(url string, format string) string {
+	return strings.ReplaceAll(url, "mermaid.live/view/#pako", "mermaid.ink/img/pako") + "?type=" + format
 }
 
 func main() {
@@ -268,7 +362,9 @@ func main() {
 
 		if len(flow.ListNodes()) > 1 {
 			fmt.Printf("\n\n```mermaid\n%s```\n\n", flow.String())
-			fmt.Println(flow.LiveURL())
+			fmt.Printf("Live: %s\n\n", flow.LiveURL())
+			fmt.Printf("PNG:  %s\n\n", imgURL(flow.LiveURL(), "png"))
+			fmt.Printf("SVG:  %s\n\n", imgURL(flow.LiveURL(), "svg"))
 		} else {
 			fmt.Println("None")
 		}
