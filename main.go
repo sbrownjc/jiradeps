@@ -20,46 +20,67 @@ import (
 type AuthCreds struct {
 	Username string
 	Token    string
+	BaseURL  string
 }
+
+var baseURL string
 
 var ErrIncompleteCredentials = errors.New("must provide 'username' and 'token' keys in file")
 
 func getAuthCreds() (creds AuthCreds, err error) {
-	fileName := os.ExpandEnv("${HOME}/.config/gojira")
+	fileName := os.ExpandEnv("${HOME}/.config/jiradeps.json")
 	var newCreds bool
 	file, err := os.ReadFile(fileName)
 
 	usernameInput := huh.NewInput().
 		Title("Username").
-		Value(&creds.Username).Validate(func(s string) error {
-		if s == "" {
-			return fmt.Errorf("Username cannot be empty")
-		}
-		return nil
-	})
+		Value(&creds.Username).
+		Validate(func(s string) error {
+			if s == "" {
+				return fmt.Errorf("Username cannot be empty")
+			}
+			return nil
+		})
 
 	tokenInput := huh.NewInput().
 		Title("API Token").
-		Value(&creds.Token).Validate(func(s string) error {
-		if s == "" {
-			return fmt.Errorf("API token cannot be empty")
-		}
-		if len(s) < 190 {
-			return fmt.Errorf("API token must be at least 190 characters")
-		}
-		if len(s) > 200 {
-			return fmt.Errorf("API token must be at most 200 characters")
-		}
-		if strings.Contains(s, "\"") {
-			return fmt.Errorf("API token must not contain quotes")
-		}
-		return nil
-	})
+		Value(&creds.Token).
+		Validate(func(s string) error {
+			if s == "" {
+				return fmt.Errorf("API token cannot be empty")
+			}
+			if len(s) < 190 {
+				return fmt.Errorf("API token must be at least 190 characters")
+			}
+			if len(s) > 200 {
+				return fmt.Errorf("API token must be at most 200 characters")
+			}
+			if strings.Contains(s, "\"") {
+				return fmt.Errorf("API token must not contain quotes")
+			}
+			return nil
+		})
+
+	baseUrlInput := huh.NewInput().
+		Title("Base URL").
+		Value(&creds.BaseURL).
+		Validate(func(s string) error {
+			if s == "" {
+				return fmt.Errorf("Base URL cannot be empty")
+			}
+			if !strings.HasSuffix(s, "/") {
+				return fmt.Errorf("Base URL must end with a slash")
+			}
+			if !strings.HasPrefix(s, "https://") {
+				return fmt.Errorf("Base URL must start with 'https://'")
+			}
+			return nil
+		})
 
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			// If the file does not exist, prompt for credentials
-			huh.NewForm(huh.NewGroup(usernameInput, tokenInput).Title("Jira Credentials")).Run()
+			huh.NewForm(huh.NewGroup(baseUrlInput, usernameInput, tokenInput).Title("Jira Credentials")).Run()
 			newCreds = true
 		} else {
 			return creds, fmt.Errorf("reading file: %w", err)
@@ -80,6 +101,11 @@ func getAuthCreds() (creds AuthCreds, err error) {
 		tokenInput.Run()
 		newCreds = true
 	}
+	if creds.BaseURL == "" {
+		baseUrlInput.Run()
+		newCreds = true
+	}
+	baseURL = creds.BaseURL
 
 	if newCreds {
 		jsonData, err := json.MarshalIndent(creds, "", "  ")
@@ -195,7 +221,7 @@ func AddJiraNode(fc *flowchart.Flowchart, issue *jira.Issue) (node *flowchart.No
 		status := issue.Fields.Status.Name
 		node.Shape = flowchart.NShapeRoundRect
 		node.Style = GetStatusStyle(fc, status)
-		node.Link = "https://jumpcloud.atlassian.net/browse/" + issue.Key
+		node.Link = fmt.Sprintf("%sbrowse/%s", baseURL, issue.Key)
 		node.LinkText = "Jira: " + issue.Key
 		node.AddLines(
 			fmt.Sprintf("%s %s - %s", GetStatusIcon(status), issue.Key, status),
@@ -336,7 +362,7 @@ func main() {
 		Password: jiraAuth.Token,
 	}
 
-	jiraClient, err := jira.NewClient(tp.Client(), "https://jumpcloud.atlassian.net/")
+	jiraClient, err := jira.NewClient(tp.Client(), baseURL)
 	if err != nil {
 		fmt.Printf("Error making client: %v\n", err)
 		os.Exit(1)
@@ -361,7 +387,7 @@ func main() {
 		}
 
 		if len(flow.ListNodes()) > 1 {
-			fmt.Printf("\n\n```mermaid\n%s```\n\n", flow.String())
+			fmt.Printf("\n\n```mermaid\n---\nconfig:\n  theme: neutral\n---\n%s```\n\n", flow.String())
 			fmt.Printf("Live: %s\n\n", flow.LiveURL())
 			fmt.Printf("PNG:  %s\n\n", imgURL(flow.LiveURL(), "png"))
 			fmt.Printf("SVG:  %s\n\n", imgURL(flow.LiveURL(), "svg"))
