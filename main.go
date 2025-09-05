@@ -1,11 +1,14 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"html"
 	"io/fs"
+	"maps"
+	"net/url"
 	"os"
 	"sort"
 	"strconv"
@@ -277,6 +280,99 @@ func getAllLinks(issue *jira.Issue, client *jira.Client, links StringSet, fc *fl
 			}
 		}
 	}
+}
+
+// SearchWithContext performs a JQL search and returns a list of issue IDs that match the query.
+// Uses the v3 API as the v2 API is deprecated, but go-jira hasn't been updated to reflect this.
+// It handles pagination using the nextPageToken field.
+func SearchWithContext(ctx context.Context, client *jira.Client, jql string, options *map[string]any) (issueIDs []string, err error) {
+	u := url.URL{
+		Path: "rest/api/3/search/jql",
+	}
+
+	body := map[string]any{
+		"jql": jql,
+	}
+
+	if options != nil {
+		maps.Copy(body, *options)
+	}
+
+	for {
+		req, err := client.NewRequestWithContext(ctx, "POST", u.String(), &body)
+		if err != nil {
+			return []string{}, err
+		}
+
+		type searchResult struct {
+			Issues        []jira.Issue `json:"issues" structs:"issues"`
+			NextPageToken string       `json:"nextPageToken,omitempty" structs:"nextPageToken,omitempty"`
+		}
+
+		v := new(searchResult)
+		resp, err := client.Do(req, v)
+		if err != nil {
+			err = jira.NewJiraError(resp, err)
+		}
+
+		for _, issue := range v.Issues {
+			issueIDs = append(issueIDs, issue.ID)
+		}
+
+		if v.NextPageToken == "" {
+			break
+		}
+		body["nextPageToken"] = v.NextPageToken
+	}
+
+	return issueIDs, err
+}
+
+// BulkFetchIssues fetches multiple issues by their IDs or keys using the bulkfetch endpoint.
+// It retrieves specific fields for each issue to minimize data transfer.
+// Uses the v3 API as the v2 API is deprecated, but go-jira hasn't been updated to reflect this.
+func BulkFetchIssues(ctx context.Context, client *jira.Client, issueIDs []string) (issues []jira.Issue, err error) {
+	if len(issueIDs) == 0 {
+		return issues, nil
+	}
+
+	u := url.URL{
+		Path: "rest/api/3/issue/bulkfetch",
+	}
+
+	body := map[string]any{
+		"fields":         []string{"issuelinks", "labels", "priority", "status", "summary", "issuetype"},
+		"issueIdsOrKeys": issueIDs,
+	}
+	req, err := client.NewRequestWithContext(ctx, "POST", u.String(), &body)
+	if err != nil {
+		return issues, err
+	}
+	type fetchResult struct {
+		Issues      []jira.Issue `json:"issues" structs:"issues"`
+		Expand      string       `json:"expand,omitempty" structs:"expand,omitempty"`
+		IssueErrors []any        `json:"issueErrors,omitempty" structs:"issueErrors,omitempty"`
+	}
+	v := new(fetchResult)
+	resp, err := client.Do(req, &v)
+	if err != nil {
+		err = jira.NewJiraError(resp, err)
+	}
+	return v.Issues, err
+}
+
+func SearchAndFetch(ctx context.Context, client *jira.Client, jql string, options *map[string]any) (issues []jira.Issue, err error) {
+	issueIDs, err := SearchWithContext(ctx, client, jql, options)
+	if err != nil {
+		return nil, fmt.Errorf("error searching for issues: %w", err)
+	}
+
+	issues, err = BulkFetchIssues(ctx, client, issueIDs)
+	if err != nil {
+		return nil, fmt.Errorf("error bulk fetching child issues: %w", err)
+	}
+
+	return issues, nil
 }
 
 func genDepFlowchart(c *jira.Client, issueNum string, fc *flowchart.Flowchart) error {
