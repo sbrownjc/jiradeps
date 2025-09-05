@@ -10,6 +10,7 @@ import (
 	"maps"
 	"net/url"
 	"os"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -230,6 +231,12 @@ func AddJiraNode(fc *flowchart.Flowchart, issue *jira.Issue) (node *flowchart.No
 			fmt.Sprintf("%s %s - %s", GetStatusIcon(status), issue.Key, status),
 			strings.ReplaceAll(html.EscapeString(text), "&#", "#"),
 		)
+		if len(issue.Fields.Labels) > 0 {
+			if slices.Contains(issue.Fields.Labels, "jc-blocked") {
+				node.Shape = flowchart.NShapeFlagLeft
+			}
+			node.AddLines("Labels: " + strings.Join(issue.Fields.Labels, ", "))
+		}
 	}
 
 	return node
