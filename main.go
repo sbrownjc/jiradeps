@@ -10,6 +10,7 @@ import (
 	"maps"
 	"net/url"
 	"os"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strconv"
@@ -31,8 +32,36 @@ var baseURL string
 
 var ErrIncompleteCredentials = errors.New("must provide 'username' and 'token' keys in file")
 
+func getConfigFilePath() (string, error) {
+	baseFileName := "jiradeps.json"
+	configDir, err := os.UserConfigDir()
+	if err != nil {
+		return "", fmt.Errorf("getting config dir: %w", err)
+	}
+
+	oldConfigDir := os.ExpandEnv("${HOME}/.config")
+	oldConfigDirExists := false
+	if _, err = os.Stat(oldConfigDir); err == nil {
+		oldConfigDirExists = true
+	}
+	if oldConfigDirExists && configDir != oldConfigDir {
+		fmt.Printf("Moving %s from %s to %s\n", baseFileName, oldConfigDir, configDir)
+		oldFileName := filepath.Join(oldConfigDir, baseFileName)
+		newFileName := filepath.Join(configDir, baseFileName)
+		if err = os.Rename(oldFileName, newFileName); err != nil {
+			return "", fmt.Errorf("moving config file: %w", err)
+		}
+	}
+
+	return filepath.Join(configDir, baseFileName), nil
+}
+
 func getAuthCreds() (creds AuthCreds, err error) {
-	fileName := os.ExpandEnv("${HOME}/.config/jiradeps.json")
+	fileName, err := getConfigFilePath()
+	if err != nil {
+		return creds, fmt.Errorf("getting config file path: %w", err)
+	}
+
 	var newCreds bool
 	file, err := os.ReadFile(fileName)
 
