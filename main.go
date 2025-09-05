@@ -389,7 +389,7 @@ func genDepFlowchart(c *jira.Client, issueNum string, fc *flowchart.Flowchart) e
 	fmt.Printf("Links: ")
 
 	if issue.Fields.Type.Name == "Epic" {
-		issues, _, err := c.Issue.Search(fmt.Sprintf("parentEpic = %s", issue.Key), nil)
+		issues, err := SearchAndFetch(context.Background(), c, fmt.Sprintf("parentEpic = %s", issue.Key), nil)
 		if err != nil {
 			return fmt.Errorf("error searching for child issues: %w", err)
 		}
